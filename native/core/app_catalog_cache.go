@@ -1,10 +1,13 @@
 package core
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -12,10 +15,12 @@ import (
 const nativeCatalogTTL = 15 * time.Minute
 
 type nativeCatalogState struct {
-	UpdatedAt time.Time `json:"updatedAt"`
-	Page      int       `json:"page"`
-	HasMore   bool      `json:"hasMore"`
-	Warning   string    `json:"warning,omitempty"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+	Page            int       `json:"page"`
+	HasMore         bool      `json:"hasMore"`
+	Warning         string    `json:"warning,omitempty"`
+	PageSize        int       `json:"pageSize,omitempty"`
+	PageFingerprint string    `json:"pageFingerprint,omitempty"`
 }
 
 type nativeCatalogDisk struct {
@@ -94,6 +99,9 @@ func (engine *nativeEngine) nativeCached(source string) nativeCatalogResult {
 		items[index].Cover = repairLegacyCoverURL(items[index])
 	}
 	state, found := engine.catalogStates[source]
+	if source == sourceHuangdou && state.PageSize != huangdouCatalogPageSize {
+		state.Page, state.HasMore, state.UpdatedAt = 1, true, time.Time{}
+	}
 	age := time.Since(state.UpdatedAt)
 	result := nativeCatalogResult{
 		Items: items, Page: max(1, state.Page), HasMore: !found || state.HasMore,
@@ -185,6 +193,19 @@ func (engine *nativeEngine) saveCatalogCache(source string, result *nativeCatalo
 	defer engine.mu.Unlock()
 	previous := engine.catalogs[source]
 	state := engine.catalogStates[source]
+	if result.pageSize > 0 && state.PageSize != result.pageSize {
+		state.Page, state.HasMore, state.PageFingerprint = 0, true, ""
+		state.PageSize = result.pageSize
+	}
+	if source == sourceHuangdou && result.Warning == "" {
+		fingerprint := nativeCatalogPageFingerprint(result.Items)
+		if result.Page > state.Page && len(result.Items) > 0 && fingerprint == state.PageFingerprint {
+			result.HasMore = false
+		}
+		if result.Page >= state.Page {
+			state.PageFingerprint = fingerprint
+		}
+	}
 	var items []nativeDrama
 	if result.Page == 1 {
 		items = result.Items
@@ -242,6 +263,16 @@ func (engine *nativeEngine) saveCatalogCache(source string, result *nativeCatalo
 		result.Fresh, result.HasMore = false, true
 	}
 	return err
+}
+
+func nativeCatalogPageFingerprint(items []nativeDrama) string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	sort.Strings(ids)
+	digest := sha256.Sum256([]byte(strings.Join(ids, "\n")))
+	return hex.EncodeToString(digest[:])
 }
 
 func (engine *nativeEngine) writeCatalogDiskLocked() error {

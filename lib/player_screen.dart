@@ -232,6 +232,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     _configurePictureInPicture();
     _subscriptions.add(
       _player.stream.error.listen((error) {
+        if (!_closed && error.trim().isNotEmpty) {
+          DiaryService.add('[Play] 播放器错误: $error');
+        }
         if (_enhancement.handlePlaybackError(error)) return;
         if (!_closed && _acceptErrors && mounted && error.trim().isNotEmpty) {
           _queueRecovery();
@@ -248,6 +251,9 @@ class _PlayerScreenState extends State<PlayerScreen>
           final duration = _player.state.duration;
           if (duration <= Duration.zero ||
               _player.state.position < duration - const Duration(seconds: 2)) {
+            DiaryService.add(
+              '[Play] 播放提前结束: position=${_player.state.position.inMilliseconds}ms, duration=${duration.inMilliseconds}ms',
+            );
             _queueRecovery();
           } else if (_autoAdvance &&
               _foreground &&
@@ -792,6 +798,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     final action = current.local
         ? PlaybackRecoveryAction.stop
         : _recovery.next(current);
+    DiaryService.add(
+      '[Play] 自动恢复: action=${action.name}, source=${widget.detail.drama.source}, episode=${widget.detail.episodes[_index].number}',
+    );
     if (action == PlaybackRecoveryAction.stop) {
       _resumePosition = position;
       final ticket = _generation;
@@ -1014,8 +1023,14 @@ class _PlayerScreenState extends State<PlayerScreen>
               await platform.setProperty('vd-lavc-skiploopfilter', 'all');
               await platform.setProperty('vd-lavc-skipidct', 'all');
               await platform.setProperty('vd-lavc-threads', '2');
-              await platform.setProperty('demuxer-max-bytes', '${4 * 1024 * 1024}');
-              await platform.setProperty('demuxer-max-back-bytes', '${1 * 1024 * 1024}');
+              await platform.setProperty(
+                'demuxer-max-bytes',
+                '${4 * 1024 * 1024}',
+              );
+              await platform.setProperty(
+                'demuxer-max-back-bytes',
+                '${1 * 1024 * 1024}',
+              );
               await platform.setProperty('demuxer-readahead-secs', '5');
             } else {
               await platform.setProperty('hwdec', 'auto-safe');
@@ -1045,7 +1060,9 @@ class _PlayerScreenState extends State<PlayerScreen>
         _plan = plan;
         installed = true;
         _acceptErrors = true;
-        DiaryService.add('[Play] 调用 _player.open: url=${plan.url}, headers=${plan.headers.keys.toList()}');
+        DiaryService.add(
+          '[Play] 调用 _player.open: url=${plan.url}, headers=${plan.headers.keys.toList()}',
+        );
         await _player.open(
           Media(
             plan.url,
@@ -1768,7 +1785,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         FilledButton.tonalIcon(
-                          onPressed: () => DiaryService.showDiaryDialog(context),
+                          onPressed: () =>
+                              DiaryService.showDiaryDialog(context),
                           icon: const Icon(Icons.receipt_long_rounded),
                           label: const Text('查看播放日记'),
                         ),
@@ -1779,8 +1797,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                             label: const Text('改为在线播放'),
                           )
                         else if (!_localFailure &&
-                              !widget.localOnly &&
-                              widget.repository.supportsSourceManagement)
+                            !widget.localOnly &&
+                            widget.repository.supportsSourceManagement)
                           SourceDiagnosticsButton(
                             repository: widget.repository,
                             store: widget.store,

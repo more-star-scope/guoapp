@@ -22,10 +22,11 @@ import (
 )
 
 const (
-	huangdouBaseURL     = "https://tideember.cc"
-	huangdouVersion     = "2.0.0"
-	huangdouDeviceType  = "web"
-	huangdouPlatformKey = "7961beb44246e3012ce228d6b5ced05a"
+	huangdouBaseURL         = "https://tideember.cc"
+	huangdouVersion         = "2.0.0"
+	huangdouDeviceType      = "web"
+	huangdouCatalogPageSize = 100
+	huangdouPlatformKey     = "7961beb44246e3012ce228d6b5ced05a"
 )
 
 type huangdouAPIClient struct {

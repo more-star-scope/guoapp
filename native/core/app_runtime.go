@@ -130,6 +130,7 @@ type nativeCatalogResult struct {
 	Fresh       bool          `json:"fresh"`
 	hongguo     *hongguoCatalogState
 	saveError   error
+	pageSize    int
 }
 
 type nativePlan struct {
@@ -641,9 +642,16 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 			result.HasMore = page < totalPages
 		}
 	case sourceHuangdou:
+		engine.mu.Lock()
+		state := engine.catalogStates[cacheKey]
+		engine.mu.Unlock()
+		if state.PageSize != huangdouCatalogPageSize {
+			page, result.Page = 1, 1
+		}
+		result.pageSize = huangdouCatalogPageSize
 		client := newHuangdouAPIClient(d)
 		var decoded any
-		err = client.call(ctx, "/drama/list", map[string]any{"page": strconv.Itoa(page), "page_size": "30"}, &decoded)
+		err = client.call(ctx, "/drama/list", map[string]any{"page": strconv.Itoa(page), "page_size": strconv.Itoa(huangdouCatalogPageSize)}, &decoded)
 		if err == nil {
 			rows := huangdouList(decoded)
 			for _, row := range rows {
@@ -651,7 +659,7 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 					items = append(items, drama)
 				}
 			}
-			result.HasMore = len(rows) >= 30
+			result.HasMore = len(rows) >= huangdouCatalogPageSize
 		}
 	case sourceHuangguoAI:
 		items, result.HasMore, err = d.fetchHuangguoAICatalogPage(ctx, page, category)
