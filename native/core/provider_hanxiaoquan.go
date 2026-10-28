@@ -232,7 +232,11 @@ func hanxiaoquanInfoFields(body string) map[string]string {
 }
 
 // hanxiaoquanPickPlaylist 解析全部线路，返回分集最多的那条线的线路名与分集。
-func hanxiaoquanPickPlaylist(body string) (string, []Chapter, error) {
+func hanxiaoquanPickPlaylist(body string, expectedSourceIDs ...string) (string, []Chapter, error) {
+	expectedSourceID := ""
+	if len(expectedSourceIDs) > 0 {
+		expectedSourceID = expectedSourceIDs[0]
+	}
 	lineNames := map[string]string{}
 	for _, tab := range reHanxiaoquanLineTab.FindAllStringSubmatch(body, -1) {
 		lineNames[tab[1]] = strings.TrimSpace(tab[2])
@@ -265,7 +269,8 @@ func hanxiaoquanPickPlaylist(body string) (string, []Chapter, error) {
 				segment = segment[:end]
 			}
 		}
-		var chapters []Chapter
+		playlists := map[string][]Chapter{}
+		var playlistKeys []string
 		seenPath := map[string]bool{}
 		for index, ep := range reHanxiaoquanEpisodes.FindAllStringSubmatch(segment, -1) {
 			epTitle := hanxiaoquanClean(ep[1])
@@ -275,7 +280,13 @@ func hanxiaoquanPickPlaylist(body string) (string, []Chapter, error) {
 			}
 			seenPath[playURL] = true
 			order := index + 1
-			if num := reHanxiaoquanLeadNum.FindString(epTitle); num != "" {
+			if expectedSourceID != "" {
+				var matched bool
+				order, matched = macCMSEpisodeReference(sourceHanxiaoquan, playURL, expectedSourceID)
+				if !matched {
+					continue
+				}
+			} else if num := reHanxiaoquanLeadNum.FindString(epTitle); num != "" {
 				if parsed, err := strconv.Atoi(num); err == nil && parsed > 0 && parsed <= 100000 {
 					order = parsed
 				}
@@ -283,7 +294,11 @@ func hanxiaoquanPickPlaylist(body string) (string, []Chapter, error) {
 			if epTitle == "" {
 				epTitle = fmt.Sprintf("第 %d 集", order)
 			}
-			chapters = append(chapters, Chapter{
+			playlistKey := macCMSPlaylistKey(playURL)
+			if _, found := playlists[playlistKey]; !found {
+				playlistKeys = append(playlistKeys, playlistKey)
+			}
+			playlists[playlistKey] = append(playlists[playlistKey], Chapter{
 				ID:             providerChapterID(sourceHanxiaoquan, "", playURL),
 				Source:         sourceHanxiaoquan,
 				Title:          truncate(epTitle, 128),
@@ -293,9 +308,11 @@ func hanxiaoquanPickPlaylist(body string) (string, []Chapter, error) {
 				Referer:        hanxiaoquanSiteBaseURL + "/",
 			})
 		}
-		if len(chapters) > len(best) {
-			best = chapters
-			bestName = lineNames[lineID]
+		for _, playlistKey := range playlistKeys {
+			if chapters := playlists[playlistKey]; len(chapters) > len(best) {
+				best = chapters
+				bestName = lineNames[lineID]
+			}
 		}
 	}
 	if len(best) == 0 {
@@ -392,7 +409,7 @@ func (d *Downloader) fetchHanxiaoquanDetail(ctx context.Context, sourceID string
 	}
 	drama.Tags = tags
 
-	_, chapters, err := hanxiaoquanPickPlaylist(body)
+	_, chapters, err := hanxiaoquanPickPlaylist(body, sourceID)
 	if err != nil {
 		return Drama{}, nil, err
 	}

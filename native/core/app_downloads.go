@@ -252,6 +252,16 @@ func (manager *nativeDownloads) enqueueContext(ctx context.Context, input native
 		if entry.Index < 1 || entry.Index > 100000 {
 			return 0, errors.New("下载集数无效")
 		}
+		if err := validateProviderChapter(input.Drama.ID, entry.Chapter, entry.Index); err != nil {
+			return 0, err
+		}
+	}
+	chapters := make([]Chapter, 0, len(input.Entries))
+	for _, entry := range input.Entries {
+		chapters = append(chapters, entry.Chapter)
+	}
+	if _, err := normalizeProviderChapters(input.Drama.ID, chapters); err != nil {
+		return 0, err
 	}
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
@@ -536,7 +546,7 @@ func (manager *nativeDownloads) transfer(ctx context.Context, job nativeDownload
 	return nativeDownloadResult{}, err
 }
 
-func (manager *nativeDownloads) localPlan(drama string, index int) (nativePlan, bool, error) {
+func (manager *nativeDownloads) localPlan(drama string, index int, expectedChapters ...Chapter) (nativePlan, bool, error) {
 	if !nativeDramaAvailable(nativeDrama{ID: drama}) {
 		return nativePlan{}, false, errNativeBuildSource
 	}
@@ -548,6 +558,12 @@ func (manager *nativeDownloads) localPlan(drama string, index int) (nativePlan, 
 	}
 	if !nativeDownloadAvailable(record.nativeDownloadJob) {
 		return nativePlan{}, false, errNativeBuildSource
+	}
+	if len(expectedChapters) > 0 {
+		expected := expectedChapters[0]
+		if expected.ID != "" && expected.ID != record.Chapter.ID {
+			return nativePlan{}, false, nil
+		}
 	}
 	if record.State != "completed" {
 		if record.File != "" {

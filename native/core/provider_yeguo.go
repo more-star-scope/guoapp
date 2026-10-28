@@ -227,6 +227,9 @@ func (d *Downloader) fetchYeguoDetail(ctx context.Context, sourceID string) (Dra
 	seenIDs, seenNumbers := map[string]bool{}, map[int]bool{}
 	for _, value := range episodes {
 		episode, _ := value.(map[string]any)
+		if err := validateProviderEpisodeOwner(episode, sourceID, "playlet_id", "playletId"); err != nil {
+			return Drama{}, nil, err
+		}
 		if advertisement, _ := yeguoFlag(episode["is_adv"]); advertisement {
 			continue
 		}

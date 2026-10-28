@@ -286,7 +286,11 @@ func guipianActors(body string) string {
 }
 
 // guipianPickPlaylist 选出分集最多的一条线路。
-func guipianPickPlaylist(body string) (string, []Chapter, error) {
+func guipianPickPlaylist(body string, expectedSourceIDs ...string) (string, []Chapter, error) {
+	expectedSourceID := ""
+	if len(expectedSourceIDs) > 0 {
+		expectedSourceID = expectedSourceIDs[0]
+	}
 	tabs := reGuipianTab.FindAllStringSubmatch(body, -1)
 	if len(tabs) == 0 {
 		return "", nil, errors.New("鬼片网未找到可用播放线路")
@@ -314,7 +318,8 @@ func guipianPickPlaylist(body string) (string, []Chapter, error) {
 		} else if end := strings.Index(segment, `</section>`); end >= 0 {
 			segment = segment[:end]
 		}
-		var chapters []Chapter
+		playlists := map[string][]Chapter{}
+		var playlistKeys []string
 		seenPath := map[string]bool{}
 		for index, ep := range reGuipianEpisode.FindAllStringSubmatch(segment, -1) {
 			epTitle := guipianClean(ep[1])
@@ -328,7 +333,13 @@ func guipianPickPlaylist(body string) (string, []Chapter, error) {
 			}
 			seenPath[playURL] = true
 			order := index + 1
-			if num := reGuipianLeadNum.FindString(epTitle); num != "" {
+			if expectedSourceID != "" {
+				var matched bool
+				order, matched = macCMSEpisodeReference(sourceGuipian, playURL, expectedSourceID)
+				if !matched {
+					continue
+				}
+			} else if num := reGuipianLeadNum.FindString(epTitle); num != "" {
 				if parsed, err := strconv.Atoi(num); err == nil && parsed > 0 && parsed <= 100000 {
 					order = parsed
 				}
@@ -336,7 +347,11 @@ func guipianPickPlaylist(body string) (string, []Chapter, error) {
 			if epTitle == "" {
 				epTitle = fmt.Sprintf("第 %d 集", order)
 			}
-			chapters = append(chapters, Chapter{
+			playlistKey := macCMSPlaylistKey(playURL)
+			if _, found := playlists[playlistKey]; !found {
+				playlistKeys = append(playlistKeys, playlistKey)
+			}
+			playlists[playlistKey] = append(playlists[playlistKey], Chapter{
 				ID:             providerChapterID(sourceGuipian, "", playURL),
 				Source:         sourceGuipian,
 				Title:          truncate(epTitle, 128),
@@ -346,8 +361,10 @@ func guipianPickPlaylist(body string) (string, []Chapter, error) {
 				Referer:        site + "/",
 			})
 		}
-		if len(chapters) > len(best) {
-			best, bestName = chapters, name
+		for _, playlistKey := range playlistKeys {
+			if chapters := playlists[playlistKey]; len(chapters) > len(best) {
+				best, bestName = chapters, name
+			}
 		}
 	}
 	if len(best) == 0 {
@@ -451,7 +468,7 @@ func (d *Downloader) fetchGuipianDetail(ctx context.Context, sourceID string) (D
 	}
 	drama.Tags = tags
 
-	_, chapters, err := guipianPickPlaylist(body)
+	_, chapters, err := guipianPickPlaylist(body, sourceID)
 	if err != nil {
 		return Drama{}, nil, err
 	}

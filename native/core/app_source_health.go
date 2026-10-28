@@ -147,7 +147,7 @@ func (engine *nativeEngine) checkSource(ctx context.Context, source string, sele
 	var keyURL, segmentURL string
 	if !run("播放地址与播放列表", func() (string, error) {
 		var err error
-		media, err = engine.downloader.resolveProviderMedia(ctx, Task{DramaID: drama.ID, Chapter: chapter, Index: 1})
+		media, err = engine.downloader.resolveProviderMedia(ctx, Task{DramaID: drama.ID, Chapter: chapter, Index: chapterEpisodeNumber(chapter, 1)})
 		if err != nil {
 			return "", err
 		}

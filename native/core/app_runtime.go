@@ -45,32 +45,33 @@ type Config struct {
 }
 
 type Downloader struct {
-	rankings              rankingCache
-	cfg                   Config
-	client                *http.Client
-	huangdouDetails       map[string]huangdouDetailEntry
-	huangdouDetailPending map[string]*huangdouDetailCall
-	providerMu            sync.Mutex
-	providerHosts         map[string]string
-	limiter               *requestLimiter
-	proxyRouter           *proxyRouter
-	hongguoOnce           sync.Once
-	hongguo               *hongguoAppClient
-	huangjuOnce           sync.Once
-	huangju               *huangjuAPIClient
-	yeguoOnce             sync.Once
-	yeguo                 *yeguoAPIClient
-	soraniOnce            sync.Once
-	sorani                *soraniAPIClient
-	dsdCatalog            dsdCatalogState
-	diagnostics           *diagnosticLog
-	apiMu                 sync.Mutex
-	apiBase               string
-	apiFailures           map[string]time.Time
-	legacyOnce            sync.Once
-	legacy                *legacyAPIClient
-	previewMu             sync.Mutex
-	previewSessions       map[string]*huangguoPreviewSession
+	rankings                rankingCache
+	cfg                     Config
+	client                  *http.Client
+	huangdouDetails         map[string]huangdouDetailEntry
+	huangdouDetailPending   map[string]*huangdouDetailCall
+	videoEpisodeDirectories map[string]huangguoVideoDirectory
+	providerMu              sync.Mutex
+	providerHosts           map[string]string
+	limiter                 *requestLimiter
+	proxyRouter             *proxyRouter
+	hongguoOnce             sync.Once
+	hongguo                 *hongguoAppClient
+	huangjuOnce             sync.Once
+	huangju                 *huangjuAPIClient
+	yeguoOnce               sync.Once
+	yeguo                   *yeguoAPIClient
+	soraniOnce              sync.Once
+	sorani                  *soraniAPIClient
+	dsdCatalog              dsdCatalogState
+	diagnostics             *diagnosticLog
+	apiMu                   sync.Mutex
+	apiBase                 string
+	apiFailures             map[string]time.Time
+	legacyOnce              sync.Once
+	legacy                  *legacyAPIClient
+	previewMu               sync.Mutex
+	previewSessions         map[string]*huangguoPreviewSession
 }
 
 func defaultConfig() Config { return Config{MaxPagesPerSort: 50, PageSize: 30, Retries: 2} }
@@ -746,11 +747,21 @@ func (engine *nativeEngine) nativeDetail(ctx context.Context, drama nativeDrama)
 	if err != nil {
 		return nil, err
 	}
+	chapters, err = normalizeProviderChapters(drama.ID, chapters)
+	if err != nil {
+		return nil, err
+	}
 	if len(chapters) == 0 {
 		return nil, errors.New("该剧暂时没有可播放的分集")
 	}
 	if title != "" && title != "短剧" {
 		drama.Title = title
+	}
+	if raw.ID != "" && raw.ID != drama.ID {
+		return nil, errors.New("详情返回了其他作品，请刷新剧库")
+	}
+	if raw.Source != "" && canonicalProviderSource(raw.Source) != source || raw.SourceID != "" && raw.SourceID != sourceID {
+		return nil, errors.New("详情站源或作品标识不符，请刷新剧库")
 	}
 	if raw.ID == drama.ID {
 		drama = mergeNativeDrama(drama, nativeNormalize(raw))
@@ -768,6 +779,7 @@ func (engine *nativeEngine) nativeDetail(ctx context.Context, drama nativeDrama)
 		}
 	}
 	drama.Source, drama.SourceID, drama.Episodes = source, sourceID, len(chapters)
+	engine.downloader.rememberHuangguoVideoDirectory(drama.ID, chapters)
 	if source == sourceHuangju || source == sourceYeguo {
 		drama.Episodes = max(drama.Episodes, nativeNormalize(raw).Episodes)
 	}
@@ -782,12 +794,18 @@ func (engine *nativeEngine) nativeResolve(ctx context.Context, input nativeInput
 	if _, _, valid := splitProviderDramaID(input.Drama.ID); !valid {
 		return nativePlan{}, errors.New("剧集信息无效")
 	}
+	if input.Index < 1 || input.Index > 100000 {
+		return nativePlan{}, errors.New("播放集数无效")
+	}
 	if !input.Force && engine.downloads != nil {
-		if plan, found, err := engine.downloads.localPlan(input.Drama.ID, input.Index); found || err != nil {
+		if plan, found, err := engine.downloads.localPlan(input.Drama.ID, input.Index, input.Chapter); found || err != nil {
 			if input.Action != "prepareHandoff" || !errors.Is(err, errNativeLocalFile) {
 				return plan, err
 			}
 		}
+	}
+	if err := validateProviderChapter(input.Drama.ID, input.Chapter, input.Index); err != nil {
+		return nativePlan{}, err
 	}
 	task := Task{DramaID: input.Drama.ID, DramaTitle: input.Drama.Title, Chapter: input.Chapter, Index: input.Index}
 	media, err := engine.downloader.resolveProviderMedia(ctx, task)

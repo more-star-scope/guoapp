@@ -81,7 +81,7 @@ func (d *Downloader) fetchHuangdouChapters(ctx context.Context, sourceID string)
 		}
 	}
 	sortProviderChapters(chapters)
-	return title, uniqueChapters(chapters), nil
+	return title, chapters, nil
 }
 
 func (d *Downloader) resolveHuangdouPlayback(ctx context.Context, client *huangdouAPIClient, sourceID string, seq int) (providerMedia, error) {

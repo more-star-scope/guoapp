@@ -158,6 +158,9 @@ func (d *Downloader) fetchHongguoWebChapters(ctx context.Context, sourceID strin
 	if len(detail) == 0 {
 		return "", nil, fmt.Errorf("hongguo detail is empty")
 	}
+	if err := validateProviderEpisodeOwner(detail, sourceID, "series_id", "series_id_str"); err != nil {
+		return "", nil, err
+	}
 	title := firstNonEmpty(mapString(detail, "series_name", "series_title", "name"), sourceID)
 	vids := anyList(detail["vid_list"])
 	chapters := make([]Chapter, 0, len(vids))

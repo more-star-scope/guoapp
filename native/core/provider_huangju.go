@@ -229,6 +229,9 @@ func (d *Downloader) fetchHuangjuDetail(ctx context.Context, sourceID string) (D
 	seenIDs, seenNumbers := map[string]bool{}, map[int]bool{}
 	for index, entry := range rows {
 		episode, _ := entry.(map[string]any)
+		if err := validateProviderEpisodeOwner(episode, mapString(row, "id"), "dramaId", "drama_id"); err != nil {
+			return Drama{}, nil, err
+		}
 		if playable, ok := episode["playable"].(bool); ok && !playable {
 			continue
 		}

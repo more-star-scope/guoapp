@@ -116,10 +116,18 @@ func (d *Downloader) providerURLCandidates(raw string) []string {
 }
 
 func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (providerMedia, error) {
+	if err := validateProviderChapter(task.DramaID, task.Chapter, task.Index); err != nil {
+		return providerMedia{}, err
+	}
 	chapter := task.Chapter
 	chapter.Source = canonicalProviderSource(chapter.Source)
 	if chapter.Source == "" {
 		chapter.Source = sourceFromDramaID(task.DramaID)
+	}
+	if chapter.Source == sourceHuangguoVideo {
+		if err := d.validateHuangguoVideoMembership(ctx, task); err != nil {
+			return providerMedia{}, err
+		}
 	}
 	if chapter.Source == sourceCloudFront {
 		return d.resolveLegacyMedia(ctx, task)
@@ -164,6 +172,9 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 			}
 		}
 	}
+	if err := validateProviderChapter(task.DramaID, chapter, task.Index); err != nil {
+		return providerMedia{}, err
+	}
 	media := providerMedia{URL: chapter.VideoURL, Referer: firstNonEmpty(chapter.Referer, d.providerBaseURL(chapter.Source)+"/")}
 	if chapter.Source == sourceHuangdou {
 		_, sourceID, valid := splitProviderDramaID(task.DramaID)
@@ -194,7 +205,7 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 		if chapter.Source == sourceHuangguoAI {
 			media.URL = parseAIVideoURL(body, pageURL)
 		} else {
-			media.URL = parseDataHLS(body, pageURL)
+			media.URL = huangguoVideoSingleMedia(body, pageURL)
 		}
 		media.Referer = pageURL
 	}

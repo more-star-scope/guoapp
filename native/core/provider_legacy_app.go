@@ -90,15 +90,17 @@ func (d *Downloader) fetchLegacyDetail(ctx context.Context, sourceID string) (Dr
 			return Drama{}, nil, err
 		}
 	}
-	chapters = uniqueChapters(chapters)
+	var err error
+	chapters, err = normalizeLegacyChapterEntries(chapters)
+	if err != nil {
+		return Drama{}, nil, err
+	}
 	for index := range chapters {
 		chapter := &chapters[index]
 		chapter.Source = sourceCloudFront
 		chapter.ID = providerChapterID(sourceCloudFront, sourceID, firstNonEmpty(chapter.ID, strconv.Itoa(index+1)))
 		chapter.Referer = legacyFrontendURL + "/"
-		if chapterEpisodeNumber(*chapter, 0) <= 0 {
-			chapter.CurrentEpisode = rawEpisode(index + 1)
-		}
+		chapter.CurrentEpisode = rawEpisode(legacyChapterNumber(*chapter, index+1))
 		chapter.Title = firstNonEmpty(chapter.Title, "第"+chapter.EpisodeString(index+1)+"集")
 	}
 	sortProviderChapters(chapters)
@@ -115,6 +117,34 @@ func (d *Downloader) fetchLegacyDetail(ctx context.Context, sourceID string) (Dr
 		}
 	}
 	return drama, chapters, nil
+}
+
+func legacyChapterNumber(chapter Chapter, fallback int) int {
+	if number := episodeLabelIndex(chapter.EpisodeString(0), 0); number > 0 {
+		return number
+	}
+	return episodeIndex(chapter.Title, fallback)
+}
+
+func normalizeLegacyChapterEntries(chapters []Chapter) ([]Chapter, error) {
+	seen := map[string]Chapter{}
+	var result []Chapter
+	for _, chapter := range chapters {
+		key := firstNonEmpty(chapter.ID, chapter.VideoURL)
+		if key != "" {
+			if previous, found := seen[key]; found {
+				previousNumber := legacyChapterNumber(previous, 0)
+				number := legacyChapterNumber(chapter, 0)
+				if previousNumber > 0 && number > 0 && previousNumber != number {
+					return nil, errors.New("黄果旧版同一分集对应多个编号，请刷新详情")
+				}
+				continue
+			}
+			seen[key] = chapter
+		}
+		result = append(result, chapter)
+	}
+	return result, nil
 }
 
 func (d *Downloader) resolveLegacyMedia(ctx context.Context, task Task) (providerMedia, error) {

@@ -84,7 +84,7 @@ func parseHuangguoSortDetail(body, pageURL string, patch Drama) (Drama, error) {
 	}
 	if patch.Source == sourceHuangguoAI {
 		episode := firstNonEmpty(extractAttr(metaBlock, "data-ep-base"), meta)
-		if count := episodeIndex(episode, 0); count > 0 {
+		if count := episodeLabelIndex(episode, 0); count > 0 {
 			patch.TotalEpisode, patch.EpisodeCount = count, count
 		}
 	}
