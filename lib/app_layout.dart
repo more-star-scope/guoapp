@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 
 export 'app_build.dart';
 
-const appVersion = '0.2.64';
+const appVersion = '开发快照';
 
 ThemeData televisionTheme(ThemeData theme) {
   final colors = theme.colorScheme;
@@ -52,8 +52,9 @@ class AppDevice {
   static Future<AppDevice> detect({
     AppDevice fallback = const AppDevice(),
   }) async {
-    if (defaultTargetPlatform != TargetPlatform.android) {
-      return const AppDevice();
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.windows) {
+      return fallback;
     }
     try {
       final data = await channel
@@ -90,7 +91,9 @@ class AppDevice {
   static Future<void> setBrightness(double brightness) async {
     if (defaultTargetPlatform != TargetPlatform.android) return;
     try {
-      await channel.invokeMethod('setBrightness', {'brightness': brightness.clamp(0.01, 1.0)});
+      await channel.invokeMethod('setBrightness', {
+        'brightness': brightness.clamp(0.01, 1.0),
+      });
     } catch (_) {}
   }
 

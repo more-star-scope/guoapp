@@ -184,6 +184,7 @@ abstract class AppRepository {
   Future<PlaybackPlan> fallback(PlaybackPlan current);
   Future<void> cancelPlayback();
   Future<void> release(String session);
+  Future<String> playbackError(String session) async => '';
 }
 
 class NativeRepository extends AppRepository {
@@ -894,5 +895,19 @@ class NativeRepository extends AppRepository {
     try {
       await _call({'action': 'release', 'session': session});
     } catch (_) {}
+  }
+
+  @override
+  Future<String> playbackError(String session) async {
+    if (session.isEmpty) return '';
+    try {
+      final result = await _call({
+        'action': 'playbackError',
+        'session': session,
+      });
+      return result['message'] as String? ?? '';
+    } catch (_) {
+      return '';
+    }
   }
 }

@@ -12,10 +12,7 @@ import 'widgets.dart';
 enum SwipeAction { none, brightness, episode }
 
 class GestureHudState {
-  const GestureHudState({
-    this.type = SwipeAction.none,
-    this.value = 0.0,
-  });
+  const GestureHudState({this.type = SwipeAction.none, this.value = 0.0});
   final SwipeAction type;
   final double value; // 0.0 ~ 1.0
 }
@@ -29,16 +26,19 @@ class PlayerInteractions extends ChangeNotifier {
     required this.onFullscreen,
     required this.onEpisode,
     this.onSeek,
+    this.seekStep,
   }) {
     _playing = player.stream.playing.listen((playing) {
       if (!playing) cancel();
     });
-    AppDevice.getBrightness().then((val) {
-      if (!_disposed) {
-        _brightness = val;
-        notifyListeners();
-      }
-    }).catchError((_) {});
+    AppDevice.getBrightness()
+        .then((val) {
+          if (!_disposed) {
+            _brightness = val;
+            notifyListeners();
+          }
+        })
+        .catchError((_) {});
   }
 
   final Player player;
@@ -48,6 +48,7 @@ class PlayerInteractions extends ChangeNotifier {
   final VoidCallback onFullscreen;
   final String Function(int direction) onEpisode;
   final Future<void> Function(Duration)? onSeek;
+  final int Function()? seekStep;
   late final StreamSubscription<bool> _playing;
   Timer? _holdTimer;
   Timer? _hintTimer;
@@ -90,6 +91,7 @@ class PlayerInteractions extends ChangeNotifier {
   void dismissBrightnessHud() {
     _scheduleDismissHud();
   }
+
   String get feedback => _feedback;
   bool get boosting => _boosting;
   bool get suppressTap => DateTime.now().isBefore(_ignoreTapUntil);
@@ -152,7 +154,7 @@ class PlayerInteractions extends ChangeNotifier {
       unawaited(_setRate(baseSpeed()));
       if (!silent) hint('恢复 ${baseSpeed()} 倍速');
     } else if (tap && wasKeyboard) {
-      seek(5);
+      seek(seekStep?.call() ?? 5);
     }
   }
 
@@ -239,7 +241,9 @@ class PlayerInteractions extends ChangeNotifier {
     }
     if (_pointer != event.pointer || _origin == null) return;
     final delta = (_lastPosition ?? event.localPosition) - _origin!;
-    final isVertical = delta.dy.abs() >= _swipeThreshold && delta.dy.abs() > delta.dx.abs() * 1.5;
+    final isVertical =
+        delta.dy.abs() >= _swipeThreshold &&
+        delta.dy.abs() > delta.dx.abs() * 1.5;
 
     if (_swipeAction == SwipeAction.episode &&
         _swipeEnabled &&
@@ -339,7 +343,7 @@ class PlayerInteractions extends ChangeNotifier {
     if (key == LogicalKeyboardKey.arrowRight) {
       if (event is KeyDownEvent) _beginHold(keyboard: true);
     } else if (key == LogicalKeyboardKey.arrowLeft) {
-      seek(-5);
+      seek(-(seekStep?.call() ?? 5));
     } else if (key == LogicalKeyboardKey.arrowUp) {
       changeVolume(5);
     } else if (key == LogicalKeyboardKey.arrowDown) {

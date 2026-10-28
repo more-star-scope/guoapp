@@ -127,6 +127,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   String? _saveWarning;
   PlaybackPlan? _plan;
   double _speed = 1;
+  int _seekSeconds = 5;
   double _aspectRatio = 9 / 16;
   double _resumePosition = 0;
   bool _rotating = false;
@@ -146,6 +147,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       _enhancement.supported ? _enhancement : null;
   PlaybackPreferences get _preferences => PlaybackPreferences(
     speed: _speed,
+    seekSeconds: _seekSeconds,
     quality: _requestedQuality,
     autoAdvance: _autoAdvance,
     danmaku: _danmakuEnabled,
@@ -171,6 +173,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _profileEpoch = widget.handoff?.profileEpoch ?? widget.store.profileEpoch;
     final preferences = widget.store.playbackPreferences;
     _speed = preferences.speed;
+    _seekSeconds = preferences.seekSeconds;
     _requestedQuality = preferences.quality;
     _autoAdvance = true;
     _danmakuEnabled = preferences.danmaku;
@@ -215,6 +218,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           _foreground &&
           !_panelOpen,
       baseSpeed: () => _speed,
+      seekStep: () => _seekSeconds,
       onTogglePlayback: _togglePlayback,
       onSeek: _seekTo,
       onFullscreen: _rotate,
@@ -232,12 +236,15 @@ class _PlayerScreenState extends State<PlayerScreen>
     _configurePictureInPicture();
     _subscriptions.add(
       _player.stream.error.listen((error) {
+        final session = _session;
+        final generation = _generation;
         if (!_closed && error.trim().isNotEmpty) {
           DiaryService.add('[Play] 播放器错误: $error');
         }
         if (_enhancement.handlePlaybackError(error)) return;
         if (!_closed && _acceptErrors && mounted && error.trim().isNotEmpty) {
           _queueRecovery();
+          unawaited(_recordPlaybackError(session, generation));
         }
       }),
     );
@@ -451,13 +458,17 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _applyLifecycleVisibility({bool pauseWhenHidden = true}) {
     final visible =
         _lifecycleState == AppLifecycleState.resumed ||
+        (defaultTargetPlatform == TargetPlatform.windows &&
+            _lifecycleState == AppLifecycleState.inactive) ||
         _pictureInPictureVisible;
     _foreground = visible;
     _enhancement.setForeground(_foreground);
     _syncDanmaku();
     _syncPreload();
     _health.reset();
-    if (!visible) _interactions.cancel();
+    if (!visible || _lifecycleState == AppLifecycleState.inactive) {
+      _interactions.cancel();
+    }
     if (pauseWhenHidden &&
         !visible &&
         (_lifecycleState == AppLifecycleState.paused ||
@@ -779,6 +790,23 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
       unawaited(_recover());
     });
+  }
+
+  Future<void> _recordPlaybackError(String session, int generation) async {
+    if (session.isEmpty) return;
+    try {
+      final detail = await widget.repository
+          .playbackError(session)
+          .timeout(const Duration(seconds: 3));
+      if (_closed ||
+          !mounted ||
+          generation != _generation ||
+          session != _session ||
+          widget.store.profileEpoch != _profileEpoch) {
+        return;
+      }
+      if (detail.isNotEmpty) DiaryService.add('[Play] 本机转发错误: $detail');
+    } catch (_) {}
   }
 
   Future<void> _recover() async {
@@ -1217,6 +1245,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _enhancement.setPreferences(nextPreferences.enhancement);
     setState(() {
       _speed = nextPreferences.speed;
+      _seekSeconds = nextPreferences.seekSeconds;
       _requestedQuality = nextPreferences.quality;
       _autoAdvance = true;
       _danmakuEnabled = nextPreferences.danmaku;
@@ -1416,6 +1445,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             data: televisionTheme(AppTheme.dark),
             child: TelevisionSettingsDialog(
               speed: _speed,
+              seekSeconds: _seekSeconds,
               quality: _requestedQuality,
               qualities: _plan?.qualities ?? [],
               favorite: widget.store.isFavorite(widget.detail.drama.id),
@@ -1444,6 +1474,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       await _setPreferences(
         _preferences.copyWith(
           speed: selection.speed,
+          seekSeconds: selection.seekSeconds,
           quality: selection.quality,
           autoAdvance: true,
           danmaku: selection.danmaku,
@@ -1664,6 +1695,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         : _television
         ? TelevisionControls(
             player: _player,
+            seekSeconds: _seekSeconds,
             title: title,
             enabled: !_loading && _error == null,
             showOnPlaybackReady: _showControlsOnPlaybackReady,
@@ -1701,6 +1733,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             onEpisodes: () => _openPanel(PlayerMenuSection.episodes),
             onSpeed: () => _openPanel(PlayerMenuSection.speed),
             onQuality: () => _openPanel(PlayerMenuSection.quality),
+            onSeekSettings: () => _openPanel(PlayerMenuSection.seek),
             onDanmaku: widget.detail.drama.source == 'hongguo'
                 ? _toggleDanmaku
                 : null,

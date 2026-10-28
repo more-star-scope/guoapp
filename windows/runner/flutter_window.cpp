@@ -33,6 +33,13 @@ bool FlutterWindow::OnCreate() {
   device_channel_->SetMethodCallHandler(
       [](const flutter::MethodCall<flutter::EncodableValue>& call,
          std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() == "deviceInfo") {
+          flutter::EncodableMap values;
+          values[flutter::EncodableValue("television")] = flutter::EncodableValue(false);
+          values[flutter::EncodableValue("version")] = flutter::EncodableValue(FLUTTER_VERSION);
+          result->Success(flutter::EncodableValue(values));
+          return;
+        }
         if (call.method_name() != "playbackPower") {
           result->NotImplemented();
           return;

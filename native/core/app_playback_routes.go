@@ -154,3 +154,14 @@ func (engine *nativeEngine) nativeReleasePlayback(session string) {
 		stream.nativeRelease(choice.streamSession)
 	}
 }
+
+func (engine *nativeEngine) nativePlaybackError(session string) string {
+	engine.mu.Lock()
+	choice := engine.playbacks[session]
+	stream := engine.stream
+	engine.mu.Unlock()
+	if stream == nil || choice.streamSession == "" {
+		return ""
+	}
+	return stream.nativeError(choice.streamSession)
+}

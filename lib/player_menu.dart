@@ -5,11 +5,12 @@ import 'package:flutter/material.dart';
 import 'models.dart';
 import 'episode_browser.dart';
 import 'playback_preferences.dart';
+import 'playback_seek_dialog.dart';
 import 'video_enhancement.dart';
 import 'video_enhancement_settings.dart';
 import 'diary_service.dart';
 
-enum PlayerMenuSection { episodes, speed, quality, settings }
+enum PlayerMenuSection { episodes, speed, quality, seek, settings }
 
 class PlayerMenu extends StatefulWidget {
   const PlayerMenu({
@@ -76,6 +77,20 @@ class _PlayerMenuState extends State<PlayerMenu> {
     }
   }
 
+  Future<void> _customSeek() async {
+    if (_busy) return;
+    final seconds = await showPlaybackSeekDialog(
+      context,
+      widget.preferences.seekSeconds,
+    );
+    if (!mounted || seconds == null) return;
+    await _run(
+      () => widget.onPreferences(
+        widget.preferences.copyWith(seekSeconds: seconds),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
@@ -85,6 +100,7 @@ class _PlayerMenuState extends State<PlayerMenu> {
       PlayerMenuSection.episodes => '选集 · 共 ${widget.episodes.length} 集',
       PlayerMenuSection.speed => '播放倍速',
       PlayerMenuSection.quality => '清晰度',
+      PlayerMenuSection.seek => '快进 / 快退',
       PlayerMenuSection.settings => '播放设置',
     };
     return Dialog(
@@ -162,6 +178,42 @@ class _PlayerMenuState extends State<PlayerMenu> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (all || widget.section == PlayerMenuSection.seek) ...[
+          const Text('快进 / 快退步长'),
+          const SizedBox(height: 8),
+          Text('左右键每次跳转的秒数，保存后立即生效。长按右键仍为临时 3 倍速。', style: helperStyle),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final seconds in playbackSeekSteps)
+                ChoiceChip(
+                  key: ValueKey('menu-seek-$seconds'),
+                  label: Text('$seconds 秒'),
+                  selected: seconds == preferences.seekSeconds,
+                  onSelected: _busy
+                      ? null
+                      : (_) => _run(
+                          () => widget.onPreferences(
+                            preferences.copyWith(seekSeconds: seconds),
+                          ),
+                        ),
+                ),
+              ChoiceChip(
+                key: const ValueKey('menu-seek-custom'),
+                label: Text(
+                  playbackSeekSteps.contains(preferences.seekSeconds)
+                      ? '自定义'
+                      : '自定义（${preferences.seekSeconds} 秒）',
+                ),
+                selected: !playbackSeekSteps.contains(preferences.seekSeconds),
+                onSelected: _busy ? null : (_) => _customSeek(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+        ],
         if (all || widget.section == PlayerMenuSection.speed) ...[
           const Text('倍速'),
           const SizedBox(height: 8),
@@ -315,7 +367,7 @@ class _PlayerMenuState extends State<PlayerMenu> {
           Text(
             widget.mobile
                 ? '上下滑切集；长按画面临时 3 倍速，松开恢复。竖屏轻点暂停，横屏轻点显示控制；双击播放或暂停。'
-                : '空格：播放 / 暂停\n左右键：后退 / 快进 5 秒\n长按右键或画面：临时 3 倍速\n上下键：音量 ±5%，M：静音\nF、F11、Ctrl+F：全屏\nEsc：先关闭菜单，再退出全屏',
+                : '空格：播放 / 暂停\n左右键：后退 / 快进 ${preferences.seekSeconds} 秒\n长按右键或画面：临时 3 倍速\n上下键：音量 ±5%，M：静音\nF、F11、Ctrl+F：全屏\nEsc：先关闭菜单，再退出全屏',
             style: helperStyle.copyWith(height: 1.6),
           ),
         ],

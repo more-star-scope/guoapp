@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 
 import 'models.dart';
 import 'playback_preferences.dart';
+import 'playback_seek_dialog.dart';
 import 'video_enhancement.dart';
 import 'video_enhancement_preferences.dart';
 import 'video_enhancement_settings.dart';
@@ -27,6 +28,7 @@ class TelevisionControls extends StatefulWidget {
     required this.onEpisodes,
     required this.onSettings,
     required this.onBack,
+    this.seekSeconds = 10,
     this.enhancement,
   });
   final Player player;
@@ -40,6 +42,7 @@ class TelevisionControls extends StatefulWidget {
   final Future<void> Function() onEpisodes;
   final Future<void> Function() onSettings;
   final VoidCallback onBack;
+  final int seekSeconds;
   final VideoEnhancementController? enhancement;
 
   @override
@@ -209,10 +212,10 @@ class _TelevisionControlsState extends State<TelevisionControls> {
       if (event is KeyDownEvent) widget.onPrevious?.call();
     } else if ((!_visible || _progress.hasFocus) &&
         key == LogicalKeyboardKey.arrowLeft) {
-      _seek(-10);
+      _seek(-widget.seekSeconds);
     } else if ((!_visible || _progress.hasFocus) &&
         key == LogicalKeyboardKey.arrowRight) {
-      _seek(10);
+      _seek(widget.seekSeconds);
     } else if ((!_visible || _surface.hasPrimaryFocus) &&
         [
           LogicalKeyboardKey.arrowUp,
@@ -236,7 +239,14 @@ class _TelevisionControlsState extends State<TelevisionControls> {
     for (final subscription in _subscriptions) {
       subscription.cancel();
     }
-    for (final node in [_surface, _play, _episodes, _diary, _settings, _progress]) {
+    for (final node in [
+      _surface,
+      _play,
+      _episodes,
+      _diary,
+      _settings,
+      _progress,
+    ]) {
       node.dispose();
     }
     super.dispose();
@@ -327,7 +337,7 @@ class _TelevisionControlsState extends State<TelevisionControls> {
                     children: [
                       RemoteTarget(
                         key: const ValueKey('tv-progress'),
-                        label: '播放进度，左右键快进或后退十秒',
+                        label: '播放进度，左右键快进或后退 ${widget.seekSeconds} 秒',
                         focusNode: _progress,
                         onPressed: widget.onTogglePlayback,
                         child: Column(
@@ -462,9 +472,12 @@ class _TelevisionControlsState extends State<TelevisionControls> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      const Text(
-                        '控制条隐藏后：左右快进 10 秒，上下或确认键显示控制条',
-                        style: TextStyle(fontSize: 13, color: Colors.white70),
+                      Text(
+                        '控制条隐藏后：左右快进 ${widget.seekSeconds} 秒，上下或确认键显示控制条',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Colors.white70,
+                        ),
                       ),
                     ],
                   ),
@@ -525,6 +538,7 @@ class TelevisionEpisodeDialog extends StatelessWidget {
 class TelevisionPlaybackSetting {
   const TelevisionPlaybackSetting({
     this.speed,
+    this.seekSeconds,
     this.quality,
     this.autoAdvance,
     this.danmaku,
@@ -532,6 +546,7 @@ class TelevisionPlaybackSetting {
     this.enhancement,
   });
   final double? speed;
+  final int? seekSeconds;
   final int? quality;
   final bool? autoAdvance;
   final bool? danmaku;
@@ -543,6 +558,7 @@ class TelevisionSettingsDialog extends StatelessWidget {
   const TelevisionSettingsDialog({
     super.key,
     required this.speed,
+    this.seekSeconds = 5,
     required this.quality,
     required this.qualities,
     required this.favorite,
@@ -558,6 +574,7 @@ class TelevisionSettingsDialog extends StatelessWidget {
     this.onCompareEnhancement,
   });
   final double speed;
+  final int seekSeconds;
   final int quality;
   final List<int> qualities;
   final bool favorite;
@@ -582,6 +599,43 @@ class TelevisionSettingsDialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
+            const Text('快进 / 快退步长', style: TextStyle(fontSize: 18)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final seconds in playbackSeekSteps)
+                  RemoteButton(
+                    key: ValueKey('tv-seek-$seconds'),
+                    label: '$seconds 秒',
+                    selected: seconds == seekSeconds,
+                    onPressed: () => Navigator.pop(
+                      context,
+                      TelevisionPlaybackSetting(seekSeconds: seconds),
+                    ),
+                  ),
+                RemoteButton(
+                  key: const ValueKey('tv-seek-custom'),
+                  label: playbackSeekSteps.contains(seekSeconds)
+                      ? '自定义'
+                      : '自定义（$seekSeconds 秒）',
+                  selected: !playbackSeekSteps.contains(seekSeconds),
+                  onPressed: () async {
+                    final seconds = await showPlaybackSeekDialog(
+                      context,
+                      seekSeconds,
+                    );
+                    if (!context.mounted || seconds == null) return;
+                    Navigator.pop(
+                      context,
+                      TelevisionPlaybackSetting(seekSeconds: seconds),
+                    );
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
             const Text('倍速', style: TextStyle(fontSize: 18)),
             const SizedBox(height: 8),
             Wrap(

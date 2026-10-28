@@ -35,6 +35,7 @@ class PlayerControls extends StatefulWidget {
     this.swipeEnabled = false,
     this.panelOpen = false,
     this.onSeek,
+    this.onSeekSettings,
     this.onDanmaku,
     this.onRetryDanmaku,
     this.onPush,
@@ -65,6 +66,7 @@ class PlayerControls extends StatefulWidget {
   final bool swipeEnabled;
   final bool panelOpen;
   final Future<void> Function(Duration)? onSeek;
+  final Future<void> Function()? onSeekSettings;
   final Future<void> Function()? onDanmaku;
   final Future<void> Function()? onRetryDanmaku;
   final Future<void> Function()? onPush;
@@ -767,6 +769,13 @@ class _PlayerControlsState extends State<PlayerControls> {
         ),
       ],
       if (showPush) _lanPushTool(const ValueKey('fullscreen-lan-push')),
+      if (widget.onSeekSettings != null)
+        _toolIcon(
+          key: const ValueKey('player-seek-settings'),
+          tooltip: '快进 / 快退设置',
+          icon: Icons.settings_rounded,
+          onPressed: () => _panel(widget.onSeekSettings!),
+        ),
       if (showEpisodes)
         _toolIcon(
           key: const ValueKey('player-episodes'),
@@ -812,6 +821,13 @@ class _PlayerControlsState extends State<PlayerControls> {
 
   Widget _mobileControlRow({required bool fullscreen}) {
     final tools = [
+      if (widget.onSeekSettings != null)
+        _toolIcon(
+          key: const ValueKey('player-seek-settings'),
+          tooltip: '快进 / 快退设置',
+          icon: Icons.settings_rounded,
+          onPressed: () => _panel(widget.onSeekSettings!),
+        ),
       _toolText(
         key: const ValueKey('player-speed'),
         tooltip: '倍速',
@@ -998,8 +1014,8 @@ class _PlayerControlsState extends State<PlayerControls> {
         final icon = value < 0.33
             ? Icons.brightness_low_rounded
             : value < 0.66
-                ? Icons.brightness_medium_rounded
-                : Icons.brightness_high_rounded;
+            ? Icons.brightness_medium_rounded
+            : Icons.brightness_high_rounded;
         return IgnorePointer(
           child: Center(
             child: Container(
@@ -1008,7 +1024,10 @@ class _PlayerControlsState extends State<PlayerControls> {
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: .75),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white.withValues(alpha: .15), width: 1),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: .15),
+                  width: 1,
+                ),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: .4),
@@ -1030,7 +1049,9 @@ class _PlayerControlsState extends State<PlayerControls> {
                       child: LinearProgressIndicator(
                         value: value,
                         backgroundColor: Colors.white24,
-                        valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          Colors.white,
+                        ),
                       ),
                     ),
                   ),

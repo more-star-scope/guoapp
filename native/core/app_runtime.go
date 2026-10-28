@@ -479,6 +479,8 @@ func nativeDispatch(input nativeInput) (any, error) {
 	case "release":
 		engine.nativeReleasePlayback(input.Session)
 		return true, nil
+	case "playbackError":
+		return map[string]string{"message": engine.nativePlaybackError(input.Session)}, nil
 	default:
 		return nil, errors.New("不支持的应用操作")
 	}
