@@ -254,6 +254,8 @@ class _ResourceSettingsScreenState extends State<ResourceSettingsScreen> {
                     ),
                   const SizedBox(height: 28),
                   _count('目录请求并发', _catalog, (value) => _catalog = value),
+                  const SizedBox(height: 8),
+                  const Text('不同站源可并发更新，同一站源按顺序加载；浏览和播放请求优先。'),
                   const SizedBox(height: 16),
                   Text('目录请求间隔 · $_interval 毫秒'),
                   Slider(

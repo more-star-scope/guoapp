@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -139,6 +140,54 @@ func (client *huangjuAPIClient) get(ctx context.Context, route string, query url
 }
 
 func (client *huangjuAPIClient) request(ctx context.Context, method, route string, query url.Values, body []byte, token string, retryAuth bool, limit int64) (huangjuAPIResponse, error) {
+	retries := 0
+	if method == http.MethodGet {
+		retries = min(2, max(0, client.downloader.cfg.Retries))
+	}
+	for attempt := 0; ; attempt++ {
+		response, err := client.requestOnce(ctx, method, route, query, body, token, retryAuth, limit, attempt > 0)
+		if ctx.Err() != nil {
+			return huangjuAPIResponse{}, ctx.Err()
+		}
+		if !huangjuRetryableNetworkError(err) {
+			return response, err
+		}
+		if attempt >= retries {
+			if attempt > 0 {
+				return response, fmt.Errorf("剧果网络连接中断，已重试 %d 次；请检查代理或网络后继续更新：%w", attempt, err)
+			}
+			return response, err
+		}
+		client.downloader.recordDiagnostic(diagnosticEvent{
+			Level: "warning", Event: "catalog_network_retry", Source: sourceHuangju,
+			Attempt: attempt + 1, Message: "剧果连接中断，将重新请求：" + publicError(err).Error(),
+		})
+		timer := time.NewTimer(time.Duration(1<<attempt) * 500 * time.Millisecond)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return huangjuAPIResponse{}, ctx.Err()
+		}
+	}
+}
+
+func huangjuRetryableNetworkError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var operation *net.OpError
+	if errors.As(err, &operation) {
+		return true
+	}
+	var network net.Error
+	return errors.As(err, &network) && network.Timeout()
+}
+
+func (client *huangjuAPIClient) requestOnce(ctx context.Context, method, route string, query url.Values, body []byte, token string, retryAuth bool, limit int64, freshConnection bool) (huangjuAPIResponse, error) {
 	base, err := url.Parse(client.base)
 	if err != nil || !isProviderHTTPMediaURL(client.base) || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
 		return huangjuAPIResponse{}, errors.New("剧果接口地址无效")
@@ -147,8 +196,6 @@ func (client *huangjuAPIClient) request(ctx context.Context, method, route strin
 	if background, _ := ctx.Value(backgroundCatalogKey{}).(bool); background {
 		timeout = 8 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 	address := client.base + route
 	if len(query) > 0 {
 		address += "?" + query.Encode()
@@ -168,6 +215,7 @@ func (client *huangjuAPIClient) request(ctx context.Context, method, route strin
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
+	request.Close = freshConnection
 	d := client.downloader
 	if d.limiter != nil {
 		release, err := d.limiter.acquire(ctx, request)
@@ -176,6 +224,9 @@ func (client *huangjuAPIClient) request(ctx context.Context, method, route strin
 		}
 		defer release()
 	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	request = request.WithContext(ctx)
 	transport := *d.client
 	transport.Jar = nil
 	previousRedirect := transport.CheckRedirect
@@ -206,8 +257,11 @@ func (client *huangjuAPIClient) request(ctx context.Context, method, route strin
 	if response.StatusCode < 200 || response.StatusCode >= 300 || blocked {
 		return huangjuAPIResponse{}, d.catalogResponseError(request, response, data)
 	}
-	if readErr != nil || int64(len(data)) > limit {
-		return huangjuAPIResponse{}, errors.New("剧果返回的数据过大或读取失败")
+	if readErr != nil {
+		return huangjuAPIResponse{}, fmt.Errorf("剧果响应读取失败：%w", publicError(readErr))
+	}
+	if int64(len(data)) > limit {
+		return huangjuAPIResponse{}, errors.New("剧果返回的数据过大")
 	}
 	var decoded any
 	decoder := json.NewDecoder(bytes.NewReader(data))

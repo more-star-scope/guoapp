@@ -79,6 +79,7 @@ func (d *Downloader) catalogResponseError(request *http.Request, response *http.
 type requestLimiter struct {
 	concurrency        int
 	active             int
+	backgroundActive   int
 	foregroundWaiting  int
 	lastForeground     time.Time
 	interval           time.Duration
@@ -149,11 +150,14 @@ func (limiter *requestLimiter) acquire(ctx context.Context, request *http.Reques
 				delay = idleDelay
 			}
 		}
-		lowPriorityReady := !background || limiter.foregroundWaiting == 0 && limiter.active == 0
+		lowPriorityReady := !background || limiter.foregroundWaiting == 0 && limiter.active == limiter.backgroundActive
 		if lowPriorityReady && !gate.busy && limiter.active < limiter.concurrency && delay <= 0 {
 			gate.busy = true
 			gate.lastStart = time.Now()
 			limiter.active++
+			if background {
+				limiter.backgroundActive++
+			}
 			limiter.mu.Unlock()
 			break
 		}
@@ -179,6 +183,9 @@ func (limiter *requestLimiter) acquire(ctx context.Context, request *http.Reques
 		once.Do(func() {
 			limiter.mu.Lock()
 			limiter.active--
+			if background {
+				limiter.backgroundActive--
+			}
 			gate.busy = false
 			if !background {
 				limiter.lastForeground = time.Now()
