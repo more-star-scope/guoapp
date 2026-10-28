@@ -9,6 +9,8 @@ import 'models.dart';
 import 'player_screen.dart';
 import 'widgets.dart';
 
+final _playbackLaunchRequests = Expando<Object>();
+
 Future<void> openPlaybackDirectly(
   BuildContext context, {
   required Drama drama,
@@ -16,9 +18,20 @@ Future<void> openPlaybackDirectly(
   required LocalStore store,
 }) async {
   final profileEpoch = store.profileEpoch;
+  final navigator = Navigator.of(context);
+  final route = ModalRoute.of(context);
+  final messenger = ScaffoldMessenger.of(context);
+  final request = Object();
+  _playbackLaunchRequests[navigator] = request;
+  messenger.clearSnackBars();
+  bool currentRequest() =>
+      context.mounted &&
+      profileEpoch == store.profileEpoch &&
+      identical(_playbackLaunchRequests[navigator], request) &&
+      (route == null || route.isCurrent);
   try {
     final detail = await repository.detail(drama);
-    if (!context.mounted || profileEpoch != store.profileEpoch) return;
+    if (!currentRequest()) return;
     final mergedDrama = repository.catalogUpdates
         .current(drama)
         .merge(detail.drama);
@@ -29,7 +42,7 @@ Future<void> openPlaybackDirectly(
     );
     repository.catalogUpdates.publish(mergedDrama, retryCover: true);
     await saveUserChange(context, () => store.refreshDrama(mergedDrama));
-    if (!context.mounted || profileEpoch != store.profileEpoch) return;
+    if (!currentRequest()) return;
     if (merged.episodes.isEmpty) {
       throw AppFailure('暂时没有可播放的集数');
     }
@@ -54,14 +67,15 @@ Future<void> openPlaybackDirectly(
           ],
         ),
       );
-      if (accepted != true || !context.mounted) return;
+      if (accepted != true || !currentRequest()) return;
     }
     final position =
         watched?.episode == episode.number && watched?.finished == false
         ? watched!.position
         : 0.0;
-    if (!context.mounted || profileEpoch != store.profileEpoch) return;
-    await Navigator.of(context).push(
+    if (!currentRequest()) return;
+    messenger.clearSnackBars();
+    await navigator.push(
       MaterialPageRoute<void>(
         builder: (_) => PlayerScreen(
           detail: merged,
@@ -73,15 +87,35 @@ Future<void> openPlaybackDirectly(
       ),
     );
   } catch (error) {
-    if (!context.mounted || profileEpoch != store.profileEpoch) return;
+    if (!currentRequest()) return;
     repository.catalogUpdates.publish(
       repository.catalogUpdates.current(drama),
       retryCover: true,
     );
     final message = error is AppFailure ? error.message : '暂时无法播放，请重试';
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 8),
+        persist: false,
+        showCloseIcon: true,
+        action: SnackBarAction(
+          label: '刷新详情',
+          onPressed: () {
+            if (!currentRequest()) return;
+            unawaited(
+              openPlaybackDirectly(
+                context,
+                drama: repository.catalogUpdates.current(drama),
+                repository: repository,
+                store: store,
+              ),
+            );
+          },
+        ),
+      ),
+    );
   }
 }
 
@@ -170,11 +204,13 @@ class _PlaybackLaunchScreenState extends State<PlaybackLaunchScreen> {
             ],
           ),
         );
-        if (accepted != true) {
-          if (mounted) Navigator.of(context).maybePop();
+        if (!mounted ||
+            generation != _generation ||
+            _profileEpoch != widget.store.profileEpoch) {
           return;
         }
-        if (!mounted) {
+        if (accepted != true) {
+          Navigator.of(context).maybePop();
           return;
         }
       }
@@ -199,7 +235,11 @@ class _PlaybackLaunchScreenState extends State<PlaybackLaunchScreen> {
         ),
       );
     } catch (error) {
-      if (!mounted || generation != _generation) return;
+      if (!mounted ||
+          generation != _generation ||
+          _profileEpoch != widget.store.profileEpoch) {
+        return;
+      }
       setState(() => _error = error.toString());
       widget.repository.catalogUpdates.publish(
         widget.repository.catalogUpdates.current(widget.drama),
@@ -228,7 +268,7 @@ class _PlaybackLaunchScreenState extends State<PlaybackLaunchScreen> {
               title: '暂时无法播放',
               message: _error!,
               onRetry: _load,
-              action: '重试',
+              action: '刷新详情',
               icon: Icons.play_disabled_rounded,
             ),
     ),
