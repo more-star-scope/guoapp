@@ -44,6 +44,10 @@ func providerPageIdentity(address string, expectedSources ...string) (string, st
 		if len(parts) == 2 && (parts[0] == "hanxiaoquan" || parts[0] == "nv") && strings.HasSuffix(parts[1], ".html") {
 			return source, "detail:" + strings.TrimSuffix(parts[1], ".html")
 		}
+	case sourceHsex:
+		if match := reHsexVideoPath.FindStringSubmatch(parsed.Path); len(match) == 2 {
+			return source, "detail:" + match[1]
+		}
 	case sourceHongguo:
 		if parsed.Path == "/detail" && parsed.Query().Get("series_id") != "" {
 			return source, "detail:" + parsed.Query().Get("series_id")
@@ -187,6 +191,11 @@ func validateProviderChapter(dramaID string, chapter Chapter, index int) error {
 		}
 		if chapter.PageURL != "" && chapter.PageURL != key {
 			return errors.New("分集播放入口不一致，请刷新详情后重新选择")
+		}
+	case sourceHsex:
+		pageSource, pageID := providerPageIdentity(chapter.PageURL)
+		if key != sourceID || chapter.VideoURL != "hsex-play://"+sourceID || pageSource != sourceHsex || pageID != "detail:"+sourceID {
+			return errors.New("好色 TV 播放页与当前视频不符，请刷新详情后重新选择")
 		}
 	case sourceDSD:
 		parts := strings.Split(key, "-")
