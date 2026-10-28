@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -133,10 +134,12 @@ func (engine *nativeEngine) nativeCategories(ctx context.Context, source string,
 		}
 	case sourceSorani:
 		all = append(all, d.fetchSoraniCategories()...)
-	case sourceGuipian:
-		all = append(all, d.fetchGuipianCategories()...)
-	case sourceHanxiaoquan:
-		all = append(all, d.fetchHanxiaoquanCategories()...)
+	case sourceGuipian, sourceHanxiaoquan:
+		var categories []nativeCategory
+		categories, err = d.fetchMacCMSCatalogCategories(ctx, source)
+		if err == nil {
+			all = append(all, categories...)
+		}
 	case sourceHsex:
 		all = append(all, d.fetchHsexCategories()...)
 	default:
@@ -193,6 +196,7 @@ func (d *Downloader) fetchHuangguoAICatalogPage(ctx context.Context, page int, c
 	}
 	type categoryResult struct {
 		items []Drama
+		more  bool
 		err   error
 	}
 	results := make([]categoryResult, len(categories))
@@ -212,7 +216,7 @@ func (d *Downloader) fetchHuangguoAICatalogPage(ctx context.Context, page int, c
 			address := fmt.Sprintf("%s/api/videos/category/%s?sort=hot&page=%d&size=24", d.providerBaseURL(sourceHuangguoAI), url.PathEscape(entry.ID), page)
 			body, err := d.fetchProviderText(ctx, address, d.providerBaseURL(sourceHuangguoAI)+"/"+entry.ID+"/")
 			if err == nil {
-				results[index].items = parseHuangguoAIJSONCards([]byte(body), address, entry.Name)
+				results[index].items, results[index].more, err = parseHuangguoAICatalogPage(body, address, entry.Name, page)
 			}
 			if err != nil {
 				results[index].err = fmt.Errorf("%s: %w", entry.Name, err)
@@ -225,10 +229,39 @@ func (d *Downloader) fetchHuangguoAICatalogPage(ctx context.Context, page int, c
 	more := false
 	for _, result := range results {
 		items = append(items, result.items...)
-		more = more || len(result.items) >= 24 || result.err != nil
+		more = more || result.more || result.err != nil
 		if result.err != nil {
 			failures = append(failures, result.err)
 		}
 	}
 	return items, more, errors.Join(failures...)
+}
+
+func parseHuangguoAICatalogPage(body, address, category string, page int) ([]Drama, bool, error) {
+	var envelope map[string]any
+	if json.Unmarshal([]byte(body), &envelope) != nil {
+		return nil, false, errors.New("黄果 AI 目录不是有效数据")
+	}
+	data := nestedMap(envelope, "data")
+	rows, valid := data["items"].([]any)
+	if !valid || len(rows) > 500 {
+		return nil, false, errors.New("黄果 AI 未返回有效目录，已保留位置")
+	}
+	items := parseHuangguoAIJSONCards([]byte(body), address, category)
+	if len(items) != len(rows) {
+		return nil, false, errors.New("黄果 AI 目录包含无法识别或重复的作品")
+	}
+	pagination := nestedMap(data, "pagination")
+	actual, pageOK := webProviderInteger(pagination["page"], 1000000)
+	pages, pagesOK := webProviderInteger(pagination["pages"], 1000000)
+	size, sizeOK := webProviderInteger(pagination["size"], 500)
+	total, totalOK := webProviderInteger(pagination["total"], 100000000)
+	if !pageOK || actual != page || !pagesOK || !sizeOK || size < 1 || !totalOK || len(rows) > size || pages != (total+size-1)/size {
+		return nil, false, errors.New("黄果 AI 分页信息异常，已保留位置")
+	}
+	more := page < pages
+	if more && len(rows) == 0 {
+		return nil, false, errors.New("黄果 AI 目录缺页，已保留位置")
+	}
+	return items, more, nil
 }

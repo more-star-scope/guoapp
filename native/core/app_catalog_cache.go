@@ -15,12 +15,16 @@ import (
 const nativeCatalogTTL = 15 * time.Minute
 
 type nativeCatalogState struct {
-	UpdatedAt       time.Time `json:"updatedAt"`
-	Page            int       `json:"page"`
-	HasMore         bool      `json:"hasMore"`
-	Warning         string    `json:"warning,omitempty"`
-	PageSize        int       `json:"pageSize,omitempty"`
-	PageFingerprint string    `json:"pageFingerprint,omitempty"`
+	UpdatedAt       time.Time            `json:"updatedAt"`
+	Page            int                  `json:"page"`
+	HasMore         bool                 `json:"hasMore"`
+	Warning         string               `json:"warning,omitempty"`
+	PageSize        int                  `json:"pageSize,omitempty"`
+	PageFingerprint string               `json:"pageFingerprint,omitempty"`
+	HeadFingerprint string               `json:"headFingerprint,omitempty"`
+	ScopeVersion    int                  `json:"scopeVersion,omitempty"`
+	ScopeRefresh    bool                 `json:"scopeRefresh,omitempty"`
+	Scopes          []nativeCatalogScope `json:"scopes,omitempty"`
 }
 
 type nativeCatalogDisk struct {
@@ -99,6 +103,7 @@ func (engine *nativeEngine) nativeCached(source string) nativeCatalogResult {
 		items[index].Cover = repairLegacyCoverURL(items[index])
 	}
 	state, found := engine.catalogStates[source]
+	state = engine.catalogScopeStateLocked(source, state)
 	if source == sourceHuangdou && state.PageSize != huangdouCatalogPageSize {
 		state.Page, state.HasMore, state.UpdatedAt = 1, true, time.Time{}
 	}
@@ -193,16 +198,22 @@ func (engine *nativeEngine) saveCatalogCache(source string, result *nativeCatalo
 	defer engine.mu.Unlock()
 	previous := engine.catalogs[source]
 	state := engine.catalogStates[source]
+	previousHead := state.HeadFingerprint
+	headFingerprint := ""
+	if result.Page == 1 && result.Warning == "" {
+		headFingerprint = nativeCatalogPageFingerprint(result.Items)
+		state.HeadFingerprint = headFingerprint
+	}
 	if result.pageSize > 0 && state.PageSize != result.pageSize {
 		state.Page, state.HasMore, state.PageFingerprint = 0, true, ""
 		state.PageSize = result.pageSize
 	}
-	if source == sourceHuangdou && result.Warning == "" {
+	if result.Warning == "" {
 		fingerprint := nativeCatalogPageFingerprint(result.Items)
 		if result.Page > state.Page && len(result.Items) > 0 && fingerprint == state.PageFingerprint {
-			result.HasMore = false
+			result.Warning = "站源返回重复目录页，尚未确认目录已收齐；已保留位置，请稍后继续更新"
 		}
-		if result.Page >= state.Page {
+		if result.Warning == "" && result.Page >= state.Page {
 			state.PageFingerprint = fingerprint
 		}
 	}
@@ -227,9 +238,11 @@ func (engine *nativeEngine) saveCatalogCache(source string, result *nativeCatalo
 				}
 			}
 			result.Items = items
-			result.Page = max(1, state.Page)
-			if source != sourceHongguo && state.Page > 1 {
-				result.HasMore = state.HasMore
+			if source == sourceHongguo || previousHead != "" && previousHead == headFingerprint {
+				result.Page = max(1, state.Page)
+				if source != sourceHongguo && state.Page > 1 {
+					result.HasMore = state.HasMore
+				}
 			}
 		}
 	} else {
@@ -237,6 +250,9 @@ func (engine *nativeEngine) saveCatalogCache(source string, result *nativeCatalo
 		if result.Page < state.Page {
 			result.Page, result.HasMore = state.Page, state.HasMore
 		}
+	}
+	if result.Page == 1 && result.Warning == "" {
+		state.PageFingerprint = headFingerprint
 	}
 	engine.catalogs[source] = items
 	if result.hongguo != nil {

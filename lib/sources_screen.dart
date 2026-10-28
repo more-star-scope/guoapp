@@ -186,7 +186,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
                   const Padding(
                     padding: EdgeInsets.only(bottom: 16),
                     child: Text(
-                      '各站源可分别更新和检测。更新会查找新剧、继续加载一页历史内容，并分批补齐资料；离开此页后任务继续。',
+                      '不同站源可同时更新，浏览和播放请求优先。更新会按站源实际目录逐页加载；有多个分类的站源分别保存进度，全部分类结束后才显示目录完成。可随时停止，超时或失败后继续更新。完成范围限于源站当前公开返回的目录，剧集资料分批补齐，离开此页后任务继续。',
                     ),
                   ),
                   if (sources.isEmpty)
@@ -262,7 +262,9 @@ class _SourcesScreenState extends State<SourcesScreen> {
             Text('最近更新：${sourceTimestamp(status?.updatedAt)}'),
             if (status != null && status.count > 0)
               Text(
-                '已加载至第 ${status.page} 页${status.hasMore ? ' · 可继续加载' : ' · 当前分页已加载完'}',
+                status.catalogScopes > 0
+                    ? '已加载完 ${status.finishedScopes}/${status.catalogScopes} 个分类${status.hasMore ? ' · 可继续加载' : ' · 当前可访问目录已加载完'}'
+                    : '已加载至第 ${status.page} 页${status.hasMore ? ' · 可继续加载' : ' · 当前可访问目录已加载完'}',
               ),
             const SizedBox(height: 12),
             Wrap(
@@ -274,7 +276,11 @@ class _SourcesScreenState extends State<SourcesScreen> {
                   key: ValueKey('update-${source.id}'),
                   onPressed: enabled ? () => _run(source, 'update') : null,
                   icon: const Icon(Icons.sync_rounded),
-                  label: const Text('更新'),
+                  label: Text(
+                    (status?.count ?? 0) > 0 && status?.hasMore == true
+                        ? '继续更新'
+                        : '更新',
+                  ),
                 ),
                 OutlinedButton.icon(
                   key: ValueKey('check-${source.id}'),
@@ -295,7 +301,11 @@ class _SourcesScreenState extends State<SourcesScreen> {
                     PopupMenuItem(
                       value: 'more',
                       enabled: status?.hasMore ?? true,
-                      child: const Text('继续加载一页'),
+                      child: Text(
+                        (status?.catalogScopes ?? 0) > 0
+                            ? '继续加载一轮分类'
+                            : '继续加载一页',
+                      ),
                     ),
                     const PopupMenuItem(value: 'metadata', child: Text('补齐资料')),
                     if (source.id == 'huangdou')

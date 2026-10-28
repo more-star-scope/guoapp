@@ -488,7 +488,7 @@ func nativeDispatch(input nativeInput) (any, error) {
 	}
 }
 
-func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput) (nativeCatalogResult, error) {
+func (engine *nativeEngine) nativeCatalogPage(ctx context.Context, input nativeInput) (nativeCatalogResult, error) {
 	source := canonicalProviderSource(input.Source)
 	if !isHuangguoProviderSource(source) {
 		return nativeCatalogResult{}, errors.New("请选择有效站源")
@@ -622,11 +622,13 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 		result.LocalSearch = true
 		return result, nil
 	}
-	unlock, lockErr := engine.lockSourceCatalog(ctx, source)
-	if lockErr != nil {
-		return nativeCatalogResult{}, lockErr
+	if locked, _ := ctx.Value(catalogSourceLockedKey{}).(string); locked != source {
+		unlock, lockErr := engine.lockSourceCatalog(ctx, source)
+		if lockErr != nil {
+			return nativeCatalogResult{}, lockErr
+		}
+		defer unlock()
 	}
-	defer unlock()
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
@@ -652,9 +654,16 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 			result.HasMore = !state.Feeds["category:"+category].Exhausted
 		}
 		if len(items) == 0 && err != nil && ctx.Err() == nil && (category == "" || category == "short_play") {
+			appErr := err
 			var totalPages int
 			items, totalPages, err = d.fetchHongguoCategoryPage(ctx, "real-drama?page="+strconv.Itoa(page), "真人剧")
-			result.HasMore = page < totalPages
+			if err == nil {
+				err = fmt.Errorf("红果 App 目录未完成，当前仅显示网页真人剧目录：%w", appErr)
+				result.HasMore = true
+			} else {
+				err = errors.Join(appErr, err)
+				result.HasMore = page < totalPages
+			}
 		}
 	case sourceHuangdou:
 		engine.mu.Lock()

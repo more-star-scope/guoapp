@@ -113,6 +113,9 @@ func (d *Downloader) providerURLCandidates(raw string) []string {
 	if providerSourceForURL(configured) == "" {
 		return candidates
 	}
+	if source == sourceGuipian {
+		add(rehostProviderURL(parsed, "https://www.guipianwu.com"))
+	}
 	for _, candidate := range providerURLCandidates(raw) {
 		add(candidate)
 	}

@@ -46,6 +46,8 @@ class SourceStatus {
     : source = json['source'] as String? ?? '',
       count = intValue(json['count']),
       unknownVip = intValue(json['unknownVip']),
+      catalogScopes = intValue(json['catalogScopes']),
+      finishedScopes = intValue(json['finishedScopes']),
       page = intValue(json['page']),
       hasMore = json['hasMore'] == true,
       updatedAt = sourceTime(json['updatedAt']),
@@ -68,6 +70,7 @@ class SourceStatus {
 
   final String source, operation, stage, error, storageError;
   final int count, page, completed, total, added, unknownVip;
+  final int catalogScopes, finishedScopes;
   final bool hasMore, running;
   final DateTime? updatedAt, startedAt, finishedAt, retryAt;
   final SourceHealth? health;

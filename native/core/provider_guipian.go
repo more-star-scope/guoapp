@@ -87,12 +87,7 @@ func validGuipianCategory(category string) bool {
 	if len(category) > 16 || strings.ContainsAny(category, "|/\\\x00\r\n") {
 		return false
 	}
-	for _, entry := range guipianCategories {
-		if entry.ID == category {
-			return true
-		}
-	}
-	return false
+	return guipianNumericID(category) && category != "1" && category != "2" && category != "4"
 }
 
 func guipianNumericID(value string) bool {
@@ -255,6 +250,9 @@ func (d *Downloader) fetchGuipianCatalogPage(ctx context.Context, page int, cate
 	}
 	items := parseGuipianCards(body)
 	if len(items) == 0 {
+		if guipianPageCount(body, category, page, 0) > page || !reGuipianMainList.MatchString(body) && !strings.Contains(body, "暂无") && !strings.Contains(body, "没有找到") {
+			return nil, false, errors.New("鬼片网目录未返回可识别的条目或空列表，已保留位置")
+		}
 		return []Drama{}, false, nil
 	}
 	pageCount := guipianPageCount(body, category, page, len(items))

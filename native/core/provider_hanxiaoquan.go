@@ -65,12 +65,7 @@ func validHanxiaoquanCategory(category string) bool {
 	if len(category) > 8 || strings.ContainsAny(category, "|/\\\x00\r\n") {
 		return false
 	}
-	for _, entry := range hanxiaoquanCategories {
-		if entry.ID == category {
-			return true
-		}
-	}
-	return false
+	return hanxiaoquanNumericID(category)
 }
 
 func hanxiaoquanNumericID(value string) bool {
@@ -212,6 +207,9 @@ func (d *Downloader) fetchHanxiaoquanCatalogPage(ctx context.Context, page int, 
 	}
 	items := parseHanxiaoquanCards(body)
 	if len(items) == 0 {
+		if hanxiaoquanPageCount(body, category, page, 0) > page || !strings.Contains(body, "module-items") && !strings.Contains(body, "暂无") && !strings.Contains(body, "没有找到") {
+			return nil, false, errors.New("韩小圈目录未返回可识别的条目或空列表，已保留位置")
+		}
 		return []Drama{}, false, nil
 	}
 	pageCount := hanxiaoquanPageCount(body, category, page, len(items))

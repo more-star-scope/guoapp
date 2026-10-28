@@ -34,24 +34,26 @@ type nativeSourceRecord struct {
 }
 
 type nativeSourceStatus struct {
-	UnknownVIP   int                 `json:"unknownVip"`
-	Source       string              `json:"source"`
-	Count        int                 `json:"count"`
-	Page         int                 `json:"page"`
-	HasMore      bool                `json:"hasMore"`
-	UpdatedAt    time.Time           `json:"updatedAt"`
-	Operation    string              `json:"operation"`
-	Running      bool                `json:"running"`
-	Stage        string              `json:"stage"`
-	Completed    int                 `json:"completed"`
-	Total        int                 `json:"total"`
-	Added        int                 `json:"added"`
-	Error        string              `json:"error,omitempty"`
-	StorageError string              `json:"storageError,omitempty"`
-	StartedAt    time.Time           `json:"startedAt"`
-	FinishedAt   time.Time           `json:"finishedAt"`
-	RetryAt      time.Time           `json:"retryAt"`
-	Health       *nativeSourceHealth `json:"health,omitempty"`
+	CatalogScopes  int                 `json:"catalogScopes"`
+	FinishedScopes int                 `json:"finishedScopes"`
+	UnknownVIP     int                 `json:"unknownVip"`
+	Source         string              `json:"source"`
+	Count          int                 `json:"count"`
+	Page           int                 `json:"page"`
+	HasMore        bool                `json:"hasMore"`
+	UpdatedAt      time.Time           `json:"updatedAt"`
+	Operation      string              `json:"operation"`
+	Running        bool                `json:"running"`
+	Stage          string              `json:"stage"`
+	Completed      int                 `json:"completed"`
+	Total          int                 `json:"total"`
+	Added          int                 `json:"added"`
+	Error          string              `json:"error,omitempty"`
+	StorageError   string              `json:"storageError,omitempty"`
+	StartedAt      time.Time           `json:"startedAt"`
+	FinishedAt     time.Time           `json:"finishedAt"`
+	RetryAt        time.Time           `json:"retryAt"`
+	Health         *nativeSourceHealth `json:"health,omitempty"`
 }
 
 func (engine *nativeEngine) lockSourceCatalog(ctx context.Context, source string) (func(), error) {
@@ -132,8 +134,19 @@ func (engine *nativeEngine) sourceStatus(source string) nativeSourceStatus {
 func (engine *nativeEngine) sourceStatusLocked(source string) nativeSourceStatus {
 	record := engine.sourceRecords[source]
 	state, found := engine.catalogStates[source]
+	state = engine.catalogScopeStateLocked(source, state)
+	finishedScopes := 0
+	for _, scope := range state.Scopes {
+		child, exists := engine.catalogStates[nativeCatalogKey(source, scope.ID)]
+		if exists && !scope.Head && scope.Warning == "" && !child.HasMore && child.Warning == "" {
+			finishedScopes++
+		}
+	}
 	warning := engine.storageWarningLocked()
 	stage := record.Stage
+	if !record.Running && nativeUsesCatalogScopes(source) && state.ScopeVersion != nativeCatalogScopeVersion {
+		stage = "目录范围已扩展，请继续更新"
+	}
 	unknownVIP := 0
 	if source == sourceHuangdou {
 		for _, drama := range engine.catalogs[source] {
@@ -145,7 +158,7 @@ func (engine *nativeEngine) sourceStatusLocked(source string) nativeSourceStatus
 	if warning != "" && !record.Running && stage == "已完成" {
 		stage = "等待保存"
 	}
-	return nativeSourceStatus{Source: source, Count: len(engine.catalogs[source]), UnknownVIP: unknownVIP, Page: max(1, state.Page), HasMore: !found || state.HasMore,
+	return nativeSourceStatus{CatalogScopes: len(state.Scopes), FinishedScopes: finishedScopes, Source: source, Count: len(engine.catalogs[source]), UnknownVIP: unknownVIP, Page: max(1, state.Page), HasMore: !found || state.HasMore,
 		UpdatedAt: state.UpdatedAt, Operation: record.Operation, Running: record.Running, Stage: stage,
 		Completed: record.Completed, Total: record.Total, Added: record.Added, Error: record.Error,
 		StorageError: warning,
@@ -200,7 +213,11 @@ func (engine *nativeEngine) startSourceTask(source, operation string, drama nati
 		engine.mu.Unlock()
 		return nativeSourceStatus{}, fmt.Errorf("站源暂时暂停请求，请在 %d 秒后重试", max(1, int(time.Until(previous.RetryAt).Seconds()+.999)))
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	timeout := 3 * time.Minute
+	if operation == "update" {
+		timeout = 30 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	task := &nativeSourceTask{cancel: cancel}
 	engine.sourceTasks[source] = task
 	previous.Operation, previous.Running, previous.Stage = operation, true, "准备中"
@@ -241,6 +258,13 @@ func (engine *nativeEngine) runSourceTask(ctx context.Context, source, operation
 		record := engine.sourceRecords[source]
 		record.Running, record.FinishedAt = false, time.Now()
 		record.Stage = "已完成"
+		if operation == "update" && err == nil {
+			if engine.catalogScopeStateLocked(source, engine.catalogStates[source]).HasMore {
+				record.Stage = "目录尚未加载完"
+			} else {
+				record.Stage = "当前可访问目录已加载完"
+			}
+		}
 		if err != nil {
 			record.Stage, record.Error = "未完成", publicError(err).Error()
 			var persistence *nativePersistenceError
@@ -290,11 +314,7 @@ func (engine *nativeEngine) updateSource(ctx context.Context, source, operation 
 		engine.changeSourceRecord(source, func(record *nativeSourceRecord) { record.Stage = "继续加载历史分页" })
 		limit := 1
 		if operation == "update" {
-			maxPages := engine.downloader.cfg.MaxPagesPerSort
-			if maxPages <= 0 {
-				maxPages = defaultConfig().MaxPagesPerSort
-			}
-			limit = max(0, maxPages-1)
+			limit = -1
 		}
 		if err := engine.loadMoreSourceCatalogPages(ctx, source, limit); err != nil {
 			return err
@@ -414,9 +434,15 @@ func (engine *nativeEngine) loadSourceCatalogPage(ctx context.Context, source st
 	if err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if result.Warning != "" {
 		if result.saveError != nil {
 			return result.saveError
+		}
+		if engine.catalogScopesCanAdvance(source) {
+			return nil
 		}
 		return errors.New(result.Warning)
 	}
@@ -424,10 +450,13 @@ func (engine *nativeEngine) loadSourceCatalogPage(ctx context.Context, source st
 }
 
 func (engine *nativeEngine) loadMoreSourceCatalogPages(ctx context.Context, source string, limit int) error {
-	if limit <= 0 {
+	if limit == 0 {
 		return nil
 	}
-	for loaded := 0; loaded < limit; loaded++ {
+	for loaded := 0; limit < 0 || loaded < limit; loaded++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		current := engine.nativeCached(source)
 		if !current.HasMore {
 			return nil
@@ -442,6 +471,9 @@ func (engine *nativeEngine) loadMoreSourceCatalogPages(ctx context.Context, sour
 		if err := engine.loadSourceCatalogPage(ctx, source, page); err != nil {
 			return err
 		}
+		engine.changeSourceRecord(source, func(record *nativeSourceRecord) {
+			record.Stage = fmt.Sprintf("加载目录第 %d 页", engine.catalogStates[source].Page)
+		})
 	}
 	return nil
 }

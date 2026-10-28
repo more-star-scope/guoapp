@@ -120,7 +120,7 @@ func (d *Downloader) fetchHuangjuCategories(ctx context.Context) ([]nativeCatego
 		return nil, err
 	}
 	rows, valid := huangjuPayload(response.value).([]any)
-	if !valid || len(rows) > 300 {
+	if !valid || len(rows) > 3000 {
 		return nil, errors.New("剧果分类数据格式无效")
 	}
 	categories := []nativeCategory{{ID: huangjuNewestCategory, Name: "最新"}}
